@@ -12,6 +12,6 @@ app_name = os.getenv("APP_NAME")
 async def home():
     print("home directory toggled")
     return {
-        "message" : "App is  running",
+        "message" : "App is up and running",
         "app" : app_name
     }
