@@ -1,0 +1,102 @@
+name: Deploy to Elastic Beanstalk
+
+on:
+  push:
+    branches:
+      - dev
+      - staging
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'main' && 'prod' || github.ref_name }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      EB_APPLICATION_NAME: ${{ vars.EB_APPLICATION_NAME }}
+      EB_ENV_NAME: ${{ vars.EB_ENV_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve target environment
+        id: target
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"
+
+          case "$BRANCH" in
+            dev)
+              ;;
+            staging)
+              ;;
+            main)
+              ;;
+            *)
+              echo "Unsupported branch: $BRANCH"
+              exit 1
+              ;;
+          esac
+
+          VERSION_LABEL="${BRANCH}-${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}"
+          SOURCE_BUNDLE="deploy-${VERSION_LABEL}.zip"
+
+          echo "version_label=$VERSION_LABEL" >> "$GITHUB_OUTPUT"
+          echo "source_bundle=$SOURCE_BUNDLE" >> "$GITHUB_OUTPUT"
+
+      - name: Validate required configuration
+        run: |
+          test -n "$AWS_REGION" || (echo "Missing GitHub Environment variable AWS_REGION" && exit 1)
+          test -n "$EB_APPLICATION_NAME" || (echo "Missing GitHub Environment variable EB_APPLICATION_NAME" && exit 1)
+          test -n "$EB_ENV_NAME" || (echo "Missing environment variable EB_ENV_NAME in GitHub Environment" && exit 1)
+
+      - name: Create deployment bundle
+        run: |
+          zip -r "${{ steps.target.outputs.source_bundle }}" . \
+            -x ".git/*" \
+               ".github/*" \
+               ".env" \
+               ".env.*" \
+               ".venv/*" \
+               "venv/*" \
+               "__pycache__/*" \
+               "*.pyc" \
+               ".pytest_cache/*" \
+               ".mypy_cache/*" \
+               ".ruff_cache/*" \
+               "docker-compose.dev.yml"
+
+      - name: Get Elastic Beanstalk storage bucket
+        id: eb_bucket
+        run: |
+          BUCKET="$(aws elasticbeanstalk create-storage-location --query S3Bucket --output text)"
+          echo "name=$BUCKET" >> "$GITHUB_OUTPUT"
+
+      - name: Upload bundle to S3
+        run: |
+          aws s3 cp "${{ steps.target.outputs.source_bundle }}" \
+            "s3://${{ steps.eb_bucket.outputs.name }}/${{ steps.target.outputs.source_bundle }}"
+
+      - name: Create application version
+        run: |
+          aws elasticbeanstalk create-application-version \
+            --application-name "$EB_APPLICATION_NAME" \
+            --version-label "${{ steps.target.outputs.version_label }}" \
+            --source-bundle S3Bucket="${{ steps.eb_bucket.outputs.name }}",S3Key="${{ steps.target.outputs.source_bundle }}"
+
+      - name: Deploy application version
+        run: |
+          aws elasticbeanstalk update-environment \
+            --environment-name "$EB_ENV_NAME" \
+            --version-label "${{ steps.target.outputs.version_label }}"
