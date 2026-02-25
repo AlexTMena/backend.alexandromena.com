@@ -1,0 +1,38 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: fastapi-app-dev
+    ports:
+      - "8001:8000"
+    volumes:
+      - .:/app
+    develop:
+      watch:
+        - action: rebuild
+          path: requirements.txt
+        - action: rebuild
+          path: Dockerfile.dev
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"
+    command:
+      [
+        "uvicorn",
+        "main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+        "--reload-delay",
+        "0.5",
+        "--reload-exclude",
+        "venv/*",
+        "--reload-exclude",
+        ".venv/*",
+        "--reload-exclude",
+        "__pycache__/*",
+        "--reload-exclude",
+        ".git/*"
+      ]
