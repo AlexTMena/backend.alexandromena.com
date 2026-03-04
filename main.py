@@ -13,5 +13,5 @@ async def home():
     print("home directory toggled")
     return {
         "message" : "App is  running",
-        "game_status" "Final"
+        "game_status": "Final"
     }
